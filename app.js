@@ -5,65 +5,61 @@ const sqlite3 = require('sqlite3')
 const bcrypt = require('bcrypt')
 const jwttoken = require('jsonwebtoken')
 
-const databasePath = join(__dirname, 'covid19IndiaPortal.db')
+let db = null
 
 const app = express()
 
-app.use(json())
+app.use(express.json())
+const dbpath = path.join(__dirname, 'covid19IndiaPortal.db')
 
-let db = null
-
-const initializeDbAndServer = async () => {
+const connection = async () => {
   try {
-    db = await open({
-      filename: databasePath,
-      driver: Database,
+    db = await open({filename: dbpath, driver: sqlite3.Database})
+    app.listen(3000, () => {
+      console.log('Server is running')
     })
-
-    app.listen(3000, () =>
-      console.log('Server Running at http://localhost:3000/'),
-    )
-  } catch (error) {
-    console.log(`DB Error: ${error.message}`)
+  } catch (e) {
+    console.log('connection error : ' + e)
     process.exit(1)
   }
 }
 
-initializeDbAndServer()
+connection()
 
 const convertion = obj => {
   return {
-    stateId = obj.state_id,
-    stateName = obj.state_name,
-    population = obj.population,
+    stateId: obj.state_id,
+    stateName: obj.state_name,
+    population: obj.population,
   }
 }
 const convertionOfdis = obj => {
   return {
-    districtId = obj.district_id,
-    districtName = obj.district_name,
-    stateId = obj.state_id,
-    cases = obj.cases,
-    cured = obj.cured,
-    active = obj.active,
-    deaths = obj.deaths,
+    districtId: obj.district_id,
+    districtName: obj.district_name,
+    stateId: obj.state_id,
+    cases: obj.cases,
+    cured: obj.cured,
+    active: obj.active,
+    deaths: obj.deaths,
   }
 }
 
-const check = (request, response, next) => {
+const check = async (request, response, next) => {
   let jwt
-  const header = await request.headers['authorization']
-  if (header != undefined) {
-    const jwt = header.split(' ')[1]
+  const header = await request.headers['Authorization']
+  if (header !== undefined) {
+    jwt = header.split(' ')[1]
   }
-  if (jwt == undefined) {
+  if (jwt === undefined) {
     response.status(401)
-    response.send('Invalid jwt Token')
+    response.send('Invalid JWT Token')
   } else {
     jwttoken.verify(jwt, 'secretrkey', async (error, payLoad) => {
       if (error) {
         response.send('Invalid JWT Token')
       } else {
+        request.username = payLoad.username
         next()
       }
     })
@@ -74,20 +70,20 @@ const check = (request, response, next) => {
 app.post('/login/', async (request, response) => {
   const {username, password} = request.body
   try {
-    const get_data = `SELECT * FROM user WHERE username = '${username}`
-    const User = await db.get(get_data)
+    const get_data = `SELECT * FROM user WHERE username = '${username}';`
+    const user_data = await db.get(get_data)
 
-    if (User === undefined) {
+    if (user_data === undefined) {
       response.status(400)
       response.send(`Invalid user`)
     } else {
-      const passwordCheck = await bcrypt.compare(password, User.password)
-      if (!password) {
-        response.send(400)
-        response.send(`Invalid password`)
+      const passwordCheck = await bcrypt.compare(password, user_data.password)
+      if (passwordCheck === false) {
+        response.status(400)
+        response.send('Invalid password')
       } else {
         const payLoad = {username: username}
-        const token = await jwttoken.sign(payLoad, 'secretkey')
+        const token = await jwttoken.sign(payLoad, 'secretrkey')
         response.send({token})
       }
     }
@@ -122,7 +118,7 @@ app.get('/states/:stateId/', check, async (request, response) => {
 
 // api 4 post in district table
 
-app.post('/districts/', async (request, response) => {
+app.post('/districts/', check, async (request, response) => {
   try {
     const {districtName, stateId, cases, cured, active, deaths} = request.body
     const insertQuery = `INSERT INTO district(district_name,state_id,cases,cured,active,deaths) 
@@ -135,7 +131,7 @@ app.post('/districts/', async (request, response) => {
 })
 // 5 get data from district table
 
-app.get('/districts/:districtId/', async (request, respones) => {
+app.get('/districts/:districtId/', check, async (request, respones) => {
   try {
     const {districtId} = district.params
     const district_details = `SELECT * FROM district WHERE district_id = ${districtId}`
@@ -146,7 +142,7 @@ app.get('/districts/:districtId/', async (request, respones) => {
   }
 })
 // delete element when districtId match
-app.delete('/districts/:districtId/', async (request, respones) => {
+app.delete('/districts/:districtId/', check, async (request, respones) => {
   try {
     const {districtId} = request.params
     const delete_data = `DELETE FROM district WHERE district_id = ${districtId};`
@@ -158,7 +154,7 @@ app.delete('/districts/:districtId/', async (request, respones) => {
 })
 // update date in table
 
-app.put('/districts/:districtId/', async (request, response) => {
+app.put('/districts/:districtId/', check, async (request, response) => {
   try {
     const {districtId} = request.params
     const {districtName, stateId, cases, cured, active, deaths} = request.body
@@ -177,7 +173,7 @@ app.put('/districts/:districtId/', async (request, response) => {
   }
 })
 // get state deatils
-app.get('/states/:stateId/stats/', async (request, response) => {
+app.get('/states/:stateId/stats/', check, async (request, response) => {
   try {
     const {stateId} = request.params
     const state_details = `SELECT 
